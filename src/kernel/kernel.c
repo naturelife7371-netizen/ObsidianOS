@@ -281,6 +281,7 @@ static const char keyboard_shift_map[128] = {
 static int shift_down;
 static int caps_lock;
 static int extended_key;
+static int current_language = 0;   /* 0 = Turkce, 1 = English */
 
 static int keyboard_poll(void)
 {
@@ -535,7 +536,10 @@ static const uint8_t default_gateway[4] = { 10, 0, 2, 2 };
 
 static void shell_prompt(void)
 {
-    vga_puts_color("obsidian> ", COLOR_PROMPT);
+    if (current_language == 0)
+        vga_puts_color("obsidian> ", COLOR_PROMPT);
+    else
+        vga_puts_color("obsidian> ", COLOR_PROMPT);
 }
 
 static void shell_readline(void)
@@ -646,23 +650,43 @@ static const char *nic_name(uint16_t vendor, uint16_t device)
 
 static void command_help(void)
 {
-    vga_puts_color("Available commands:\n", COLOR_HEAD);
-    vga_puts("  help          show this help\n");
-    vga_puts("  cls, clear    clear the screen\n");
-    vga_puts("  pci           list PCI devices\n");
-    vga_puts("  net           show RTL8139 status, I/O base and MAC address\n");
-    vga_puts("  arp [ip]      resolve the MAC address of an IP (default 10.0.2.2)\n");
-    vga_puts("  ping [ip]     ARP + ICMP echo request (default 10.0.2.2)\n");
-  vga_puts("  tcp           TCP connectivity test (prototype stub)\n");
-  vga_puts("  mouse         show mouse position and buttons\n");
-  vga_puts("  files         list the in-memory file area\n");
-  vga_puts("  web           simple web/package system info\n");
-  vga_puts("  perms         permission system info\n");
-  vga_puts("  dcrcp         toggle Discord Rich Presence (host client)\n");
-    vga_puts("  info          system information\n");
-    vga_puts("  echo <text>   print text\n");
-    vga_puts("  reboot        reboot the machine\n");
-    vga_puts("  halt          halt the CPU\n");
+    if (current_language == 0) {
+        vga_puts_color("Kullanilabilir komutlar:\n", COLOR_HEAD);
+        vga_puts("  help          bu yardimi goster\n");
+        vga_puts("  cls, clear    ekrani temizle\n");
+        vga_puts("  pci           PCI cihazlarini listele\n");
+        vga_puts("  net           RTL8139 durumu, I/O tabani ve MAC adresi\n");
+        vga_puts("  arp [ip]      IP'nin MAC adresini coz (varsayilan 10.0.2.2)\n");
+        vga_puts("  ping [ip]     ARP + ICMP echo istegi (varsayilan 10.0.2.2)\n");
+        vga_puts("  tcp           TCP baglanti testi (prototip taslak)\n");
+        vga_puts("  mouse         fare konumu ve tuslari\n");
+        vga_puts("  files         bellege dayali dosya alani\n");
+        vga_puts("  web           basit web/paket sistemi bilgisi\n");
+        vga_puts("  perms         izin sistemi bilgisi\n");
+        vga_puts("  dcrcp         Discord Rich Presence'i ac/kapat\n");
+        vga_puts("  info          sistem bilgisi\n");
+        vga_puts("  echo <metin>  metin yazdir\n");
+        vga_puts("  reboot        makineyi yeniden baslat\n");
+        vga_puts("  halt          CPU'yu durdur\n");
+    } else {
+        vga_puts_color("Available commands:\n", COLOR_HEAD);
+        vga_puts("  help          show this help\n");
+        vga_puts("  cls, clear    clear the screen\n");
+        vga_puts("  pci           list PCI devices\n");
+        vga_puts("  net           show RTL8139 status, I/O base and MAC address\n");
+        vga_puts("  arp [ip]      resolve the MAC address of an IP (default 10.0.2.2)\n");
+        vga_puts("  ping [ip]     ARP + ICMP echo request (default 10.0.2.2)\n");
+        vga_puts("  tcp           TCP connectivity test (prototype stub)\n");
+        vga_puts("  mouse         show mouse position and buttons\n");
+        vga_puts("  files         list the in-memory file area\n");
+        vga_puts("  web           simple web/package system info\n");
+        vga_puts("  perms         permission system info\n");
+        vga_puts("  dcrcp         toggle Discord Rich Presence (host client)\n");
+        vga_puts("  info          system information\n");
+        vga_puts("  echo <text>   print text\n");
+        vga_puts("  reboot        reboot the machine\n");
+        vga_puts("  halt          halt the CPU\n");
+    }
 }
 
 static void command_pci(void)
@@ -1076,7 +1100,14 @@ static int installer_select(const char *title, const char **items, int count)
         vga_putc('\n');
 
         key = keyboard_getkey();
-        if (key == 1000) {          /* up */
+        /* number keys: jump directly to that item */
+        if (key >= '1' && key <= '9') {
+            int n = key - '0';
+            if (n >= 1 && n <= count) {
+                sel = n - 1;
+                page = sel / per_page;
+            }
+        } else if (key == 1000) {          /* up */
             if (sel > 0) sel--;
             if (sel < page * per_page) page--;
         } else if (key == 1001) {   /* down */
@@ -1111,6 +1142,7 @@ static void installer_run(void)
     vga_puts("Nothing here is saved; this is a one-time setup screen.\n\n");
 
     lang = installer_select("1) Select language\n", installer_languages, INSTALLER_LANG_COUNT);
+    current_language = (lang == 0) ? 0 : 1;
     vga_puts("Language set to: ");
     vga_puts(installer_languages[lang]);
     vga_putc('\n');
@@ -1143,24 +1175,35 @@ void kernel_main(void)
 
     installer_run();
 
-    vga_puts_color("ObsidianOS 0.1", COLOR_HEAD);
-    vga_puts(" - 32-bit protected mode kernel\n");
-    vga_puts_color("-----------------------------------------------------\n",
-                   COLOR_DIM);
-
-    if (rtl8139_init()) {
-        vga_puts("RTL8139 Ethernet: MAC ");
-        print_mac(rtl8139_mac());
-        vga_putc('\n');
+    if (current_language == 0) {
+        vga_puts_color("ObsidianOS 0.1", COLOR_HEAD);
+        vga_puts(" - 32-bit protected mode kernel\n");
+        vga_puts_color("-----------------------------------------------------\n", COLOR_DIM);
+        if (rtl8139_init()) {
+            vga_puts("RTL8139 Ethernet: MAC ");
+            print_mac(rtl8139_mac());
+            vga_putc('\n');
+        } else {
+            vga_puts_color("RTL8139 Ethernet: PCI veriyolunda bulunamadi\n", COLOR_ERROR);
+        }
+        mouse_init();
+        vga_puts("PS/2 fare: baslatildi (imleci hareket ettirin)\n");
+        vga_puts("Komut listesi icin 'help' yazin.\n\n");
     } else {
-        vga_puts_color("RTL8139 Ethernet: not found on the PCI bus\n",
-                       COLOR_ERROR);
+        vga_puts_color("ObsidianOS 0.1", COLOR_HEAD);
+        vga_puts(" - 32-bit protected mode kernel\n");
+        vga_puts_color("-----------------------------------------------------\n", COLOR_DIM);
+        if (rtl8139_init()) {
+            vga_puts("RTL8139 Ethernet: MAC ");
+            print_mac(rtl8139_mac());
+            vga_putc('\n');
+        } else {
+            vga_puts_color("RTL8139 Ethernet: not found on the PCI bus\n", COLOR_ERROR);
+        }
+        mouse_init();
+        vga_puts("PS/2 mouse: initialized (move to control cursor)\n");
+        vga_puts("Type 'help' for the command list.\n\n");
     }
-
-    mouse_init();
-    vga_puts("PS/2 mouse: initialized (move to control cursor)\n");
-
-    vga_puts("Type 'help' for the command list.\n\n");
 
     memset(shell_line, 0, sizeof(shell_line));
     shell_length = 0;
