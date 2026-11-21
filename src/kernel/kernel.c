@@ -630,6 +630,7 @@ static void command_help(void)
   vga_puts("  files         list the in-memory file area\n");
   vga_puts("  web           simple web/package system info\n");
   vga_puts("  perms         permission system info\n");
+  vga_puts("  dcrcp         toggle Discord Rich Presence (host client)\n");
     vga_puts("  info          system information\n");
     vga_puts("  echo <text>   print text\n");
     vga_puts("  reboot        reboot the machine\n");
@@ -838,6 +839,21 @@ static void command_perms(void)
     vga_puts("  Planned      : rwx bits, sudo, capability checks\n");
 }
 
+static int discord_rpc_enabled = 0;
+
+static void command_dcrcp(void)
+{
+    discord_rpc_enabled = !discord_rpc_enabled;
+    if (discord_rpc_enabled) {
+        vga_puts_color("Discord RPC: enabled\n", COLOR_OK);
+        vga_puts("  Run the host client: discord_rpc/ObsidianRPC.exe\n");
+        vga_puts("  App ID: 1573657423691124837\n");
+        vga_puts("  (Type 'dcrcp' again to disable.)\n");
+    } else {
+        vga_puts_color("Discord RPC: disabled\n", COLOR_ERROR);
+    }
+}
+
 static void command_info(void)
 {
     vga_puts_color("ObsidianOS\n", COLOR_HEAD);
@@ -947,6 +963,8 @@ static void shell_execute(char *line)
         command_web();
     } else if (strcmp(command, "perms") == 0) {
         command_perms();
+    } else if (strcmp(command, "dcrcp") == 0) {
+        command_dcrcp();
     } else if (strcmp(command, "info") == 0) {
         command_info();
     } else if (strcmp(command, "echo") == 0) {
