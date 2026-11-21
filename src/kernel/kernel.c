@@ -363,6 +363,111 @@ static char keyboard_getchar(void)
 }
 
 /* --------------------------------------------------------------------------
+ *  PS/2 mouse (polled)
+ * ------------------------------------------------------------------------*/
+static int  mouse_x = 40;
+static int  mouse_y = 12;
+static uint8_t mouse_buttons = 0;
+static int  mouse_initialized = 0;
+
+static void mouse_wait_input(void)
+{
+    uint32_t spin;
+    for (spin = 0; spin < 100000u; spin++)
+        if ((inb(0x64) & 0x02u) == 0)
+            return;
+}
+
+static void mouse_wait_output(void)
+{
+    uint32_t spin;
+    for (spin = 0; spin < 100000u; spin++)
+        if (inb(0x64) & 0x01u)
+            return;
+}
+
+static void mouse_write(uint8_t value)
+{
+    mouse_wait_input();
+    outb(0x64, 0xD4);
+    mouse_wait_input();
+    outb(0x60, value);
+}
+
+static uint8_t mouse_read(void)
+{
+    mouse_wait_output();
+    return inb(0x60);
+}
+
+static void mouse_init(void)
+{
+    uint8_t status;
+
+    mouse_wait_input();
+    outb(0x64, 0xA8);          /* enable auxiliary device */
+
+    mouse_wait_input();
+    outb(0x64, 0x20);          /* read command byte */
+    mouse_wait_output();
+    status = inb(0x60);
+    status |= 0x02;            /* enable aux interrupt (IRQ12) */
+    status &= (uint8_t)~0x20;  /* clear disable-aux bit */
+    mouse_wait_input();
+    outb(0x64, 0x60);          /* write command byte */
+    mouse_wait_input();
+    outb(0x60, status);
+
+    mouse_write(0xF6);         /* set defaults */
+    mouse_read();              /* ACK */
+    mouse_write(0xF4);         /* enable data reporting */
+    mouse_read();              /* ACK */
+
+    mouse_initialized = 1;
+}
+
+static void vga_move_cursor(int x, int y)
+{
+    uint16_t pos = (uint16_t)(y * 80 + x);
+    outb(0x3D4, 0x0F);
+    outb(0x3D5, (uint8_t)(pos & 0xFF));
+    outb(0x3D4, 0x0E);
+    outb(0x3D5, (uint8_t)((pos >> 8) & 0xFF));
+}
+
+static void mouse_poll(void)
+{
+    static uint8_t packet[3];
+    static int count = 0;
+    uint8_t status;
+
+    if (!mouse_initialized)
+        return;
+
+    status = inb(0x64);
+    if (!(status & 0x01))
+        return;
+    if (!(status & 0x20))
+        return;                    /* not mouse data */
+
+    packet[count++] = inb(0x60);
+    if (count < 3)
+        return;
+
+    count = 0;
+    mouse_buttons = packet[0] & 0x07;
+    mouse_x += (signed char)packet[1];
+    mouse_y -= (signed char)packet[2];
+
+    if (mouse_x < 0) mouse_x = 0;
+    if (mouse_x > 79) mouse_x = 79;
+    if (mouse_y < 0) mouse_y = 0;
+    if (mouse_y > 24) mouse_y = 24;
+
+    vga_move_cursor(mouse_x, mouse_y);
+}
+
+/* --------------------------------------------------------------------------
  *  Shared PCI device description (must match src/net/pci.c)
  * ------------------------------------------------------------------------*/
 typedef struct {
@@ -521,6 +626,10 @@ static void command_help(void)
     vga_puts("  arp [ip]      resolve the MAC address of an IP (default 10.0.2.2)\n");
     vga_puts("  ping [ip]     ARP + ICMP echo request (default 10.0.2.2)\n");
   vga_puts("  tcp           TCP connectivity test (prototype stub)\n");
+  vga_puts("  mouse         show mouse position and buttons\n");
+  vga_puts("  files         list the in-memory file area\n");
+  vga_puts("  web           simple web/package system info\n");
+  vga_puts("  perms         permission system info\n");
     vga_puts("  info          system information\n");
     vga_puts("  echo <text>   print text\n");
     vga_puts("  reboot        reboot the machine\n");
@@ -693,6 +802,42 @@ static void command_tcp(void)
     vga_puts("  (ARP/ICMP path is verified; a full TCP stack is out of scope.)\n");
 }
 
+static void command_mouse(void)
+{
+    vga_puts("Mouse: x=");
+    print_udec((uint32_t)mouse_x);
+    vga_puts(" y=");
+    print_udec((uint32_t)mouse_y);
+    vga_puts(" buttons=0x");
+    print_hex(mouse_buttons, 1);
+    vga_putc('\n');
+}
+
+static void command_files(void)
+{
+    vga_puts_color("In-memory file area (not persisted):\n", COLOR_HEAD);
+    vga_puts("  /etc/hostname      (obsidian)\n");
+    vga_puts("  /var/log/boot.log  (kernel boot log)\n");
+    vga_puts("  /home/guest/readme.txt\n");
+    vga_puts("  (File system is a stub; FAT12 driver is planned.)\n");
+}
+
+static void command_web(void)
+{
+    vga_puts_color("Web/package system (stub):\n", COLOR_HEAD);
+    vga_puts("  Endpoint : http://10.0.2.2:8080 (QEMU host)\n");
+    vga_puts("  Status   : not connected (HTTP client not implemented)\n");
+    vga_puts("  Planned  : pkg install minecraft-server, node, python, ...\n");
+}
+
+static void command_perms(void)
+{
+    vga_puts_color("Permission system (stub):\n", COLOR_HEAD);
+    vga_puts("  Current user : root (uid 0)\n");
+    vga_puts("  Policy       : all actions allowed (no enforcement yet)\n");
+    vga_puts("  Planned      : rwx bits, sudo, capability checks\n");
+}
+
 static void command_info(void)
 {
     vga_puts_color("ObsidianOS\n", COLOR_HEAD);
@@ -794,6 +939,14 @@ static void shell_execute(char *line)
         command_ping(argument);
     } else if (strcmp(command, "tcp") == 0) {
         command_tcp();
+    } else if (strcmp(command, "mouse") == 0) {
+        command_mouse();
+    } else if (strcmp(command, "files") == 0) {
+        command_files();
+    } else if (strcmp(command, "web") == 0) {
+        command_web();
+    } else if (strcmp(command, "perms") == 0) {
+        command_perms();
     } else if (strcmp(command, "info") == 0) {
         command_info();
     } else if (strcmp(command, "echo") == 0) {
@@ -813,6 +966,104 @@ static void shell_execute(char *line)
 /* --------------------------------------------------------------------------
  *  Kernel entry point (called from entry.asm)
  * ------------------------------------------------------------------------*/
+/* --------------------------------------------------------------------------
+ *  Installer (language + keyboard + usage survey). Nothing is saved.
+ * ------------------------------------------------------------------------*/
+static const char *installer_languages[] = {
+    "Turkce", "English", "Espanol", "Francais", "Deutsch", "Italiano",
+    "Portugues", "Russkiy", "Nederlands", "Polski", "Svenska", "Norsk",
+    "Dansk", "Suomi", "Cestina", "Magyar", "Romana", "Ellinika", "Hrvatski",
+    "Srpski", "Slovencina", "Slovenscina", "Lietuviu", "Latviesu",
+    "Eesti", "Islenksa", "Gaeilge", "Cymraeg", "Euskara", "Catala",
+    "Galego", "Esperanto", "Turkce (Q)", "Turkce (F)", "Arabic", "Hebrew",
+    "Thai", "Vietnamese", "Bahasa Indonesia", "Bahasa Melayu", "Tagalog",
+    "Hindi", "Bengali", "Urdu", "Persian", "Ukrainska", "Bulgarski",
+    "Slovensky", "Slovenian", "Latvian", "Estonian", "Icelandic",
+    "Welsh", "Scottish Gaelic", "Basque", "Catalan", "Galician"
+};
+#define INSTALLER_LANG_COUNT (sizeof(installer_languages)/sizeof(installer_languages[0]))
+
+static const char *installer_keyboards[] = {
+    "tr-q", "tr-f", "tr-alt", "us", "us-dvorak", "us-colemak", "uk",
+    "de", "de-neo", "fr", "fr-bepo", "es", "es-latam", "it", "pt", "pt-br",
+    "ru", "ru-phonetic", "nl", "pl", "sv", "no", "da", "fi", "cs", "hu",
+    "ro", "el", "hr", "sr", "sr-lat", "sk", "sl", "lt", "lv", "et", "is",
+    "ga", "cy", "eu", "ca", "gl", "eo", "ar", "he", "th", "vi", "id",
+    "ms", "tl", "hi", "bn", "ur", "fa", "uk", "bg", "hr2", "sk2"
+};
+#define INSTALLER_KB_COUNT (sizeof(installer_keyboards)/sizeof(installer_keyboards[0]))
+
+static void installer_run(void)
+{
+    int i, choice;
+    char key;
+    uint32_t spin;
+
+    /* Flush any stale keyboard bytes left from boot. */
+    for (spin = 0; spin < 1000; spin++) {
+        if (inb(0x64) & 0x01)
+            (void)inb(0x60);
+        else
+            break;
+        __asm__ volatile ("pause");
+    }
+
+    vga_clear();
+    vga_puts_color("=== ObsidianOS Installer ===\n", COLOR_HEAD);
+    vga_puts("Nothing here is saved; this is a one-time setup screen.\n\n");
+
+    vga_puts_color("1) Select language\n", COLOR_OK);
+    for (i = 0; i < (int)INSTALLER_LANG_COUNT; i++) {
+        vga_puts("  ");
+        if (i < 9) vga_putc(' ');
+        print_udec(i + 1);
+        vga_puts(". ");
+        vga_puts(installer_languages[i]);
+        vga_putc('\n');
+        if ((i + 1) % 3 == 0)
+            __asm__ volatile ("pause");
+    }
+    vga_puts("\nEnter number (default 1): ");
+    key = keyboard_getchar();
+    choice = 1;
+    if (key >= '1' && key <= '9') choice = key - '0';
+    vga_putc(key);
+    vga_putc('\n');
+    vga_puts("Language set to: ");
+    vga_puts(installer_languages[choice - 1]);
+    vga_putc('\n');
+
+    vga_puts_color("\n2) Select keyboard layout\n", COLOR_OK);
+    for (i = 0; i < (int)INSTALLER_KB_COUNT; i++) {
+        vga_puts("  ");
+        if (i < 9) vga_putc(' ');
+        print_udec(i + 1);
+        vga_puts(". ");
+        vga_puts(installer_keyboards[i]);
+        vga_putc('\n');
+    }
+    vga_puts("\nEnter number (default 1): ");
+    key = keyboard_getchar();
+    choice = 1;
+    if (key >= '1' && key <= '9') choice = key - '0';
+    vga_putc(key);
+    vga_putc('\n');
+    vga_puts("Keyboard set to: ");
+    vga_puts(installer_keyboards[choice - 1]);
+    vga_putc('\n');
+
+    vga_puts_color("\n3) Quick survey (not saved)\n", COLOR_OK);
+    vga_puts("Why are you using ObsidianOS? (press any key)\n");
+    vga_puts("  a) VDS / server hosting\n");
+    vga_puts("  b) Learning OS development\n");
+    vga_puts("  c) Retro computing\n");
+    vga_puts("  d) Just experimenting\n");
+    vga_puts("  e) Minecraft server hosting\n");
+    vga_puts("  f) Other\n");
+    keyboard_getchar();
+    vga_puts("Thanks! Starting system...\n\n");
+}
+
 void kernel_main(void)
 {
     vga_color = COLOR_DEFAULT;
@@ -821,6 +1072,8 @@ void kernel_main(void)
     /* We poll every device instead of using interrupts, so mask the PIC. */
     outb(0x21, 0xFF);
     outb(0xA1, 0xFF);
+
+    installer_run();
 
     vga_puts_color("ObsidianOS 0.1", COLOR_HEAD);
     vga_puts(" - 32-bit protected mode kernel\n");
@@ -836,12 +1089,16 @@ void kernel_main(void)
                        COLOR_ERROR);
     }
 
+    mouse_init();
+    vga_puts("PS/2 mouse: initialized (move to control cursor)\n");
+
     vga_puts("Type 'help' for the command list.\n\n");
 
     memset(shell_line, 0, sizeof(shell_line));
     shell_length = 0;
 
     for (;;) {
+        mouse_poll();
         shell_prompt();
         shell_readline();
         shell_execute(shell_line);

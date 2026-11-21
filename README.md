@@ -2,7 +2,7 @@
 
 Minimalist custom operating system built from scratch with Assembly and C, featuring a command-line interface (CLI), PCI bus scanning, and RTL8139 Ethernet driver experiments for x86 and QEMU.
 
-**Version:** `0.1.0` (Early Development / Prototype)  
+**Version:** `0.2.0` (Installer + ISO + Mouse support)  
 **License:** GNU General Public License v3.0 (GPLv3)
 
 ---

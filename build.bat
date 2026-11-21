@@ -185,6 +185,17 @@ if errorlevel 1 goto :link_fail
 
 echo.
 echo ============================================================
+rem ---------------------------------------------------------------------------
+rem  Optional: build a bootable ISO (El Torito) if Python + pycdlib exist
+rem ---------------------------------------------------------------------------
+where python >nul 2>nul
+if not errorlevel 1 (
+    python "%ROOT%make_iso.py" >nul 2>nul
+    if not errorlevel 1 (
+        echo   ISO     : %BUILD%\ObsidianOS.iso
+    )
+)
+
 echo   BUILD OK
 echo   Image: %BUILD%\ObsidianOS.img
 echo   Run  : run_qemu.bat
