@@ -897,6 +897,11 @@ static void command_help(void)
         vga_puts("  tcp           TCP connectivity test (prototype stub)\n");
         vga_puts("  mouse         show mouse position and buttons\n");
         vga_puts("  files         list the in-memory file area\n");
+        vga_puts("  ls            list files\n");
+        vga_puts("  cat <f>       print file contents\n");
+        vga_puts("  write <f> <t> write text to file\n");
+        vga_puts("  touch <f>     create empty file\n");
+        vga_puts("  rm <f>        remove file\n");
         vga_puts("  web           simple web/package system info\n");
         vga_puts("  perms         permission system info\n");
         vga_puts("  dcrcp         toggle Discord Rich Presence (host client)\n");
@@ -1124,6 +1129,165 @@ static void command_dcrcp(void)
     }
 }
 
+/* --------------------------------------------------------------------------
+ *  In-memory file system (not persisted; lives in RAM).
+ * ------------------------------------------------------------------------*/
+#define FS_MAX_FILES 32
+#define FS_NAME_MAX  32
+#define FS_DATA_MAX  1024
+
+typedef struct {
+    char name[FS_NAME_MAX];
+    char data[FS_DATA_MAX];
+    int  size;
+    int  used;
+} fs_file_t;
+
+static fs_file_t fs_files[FS_MAX_FILES];
+
+static int fs_find(const char *name)
+{
+    int i;
+    for (i = 0; i < FS_MAX_FILES; i++)
+        if (fs_files[i].used && strcmp(fs_files[i].name, name) == 0)
+            return i;
+    return -1;
+}
+
+static int fs_create(const char *name)
+{
+    int i;
+    if (fs_find(name) >= 0)
+        return -1;   /* already exists */
+    for (i = 0; i < FS_MAX_FILES; i++) {
+        if (!fs_files[i].used) {
+            int j;
+            fs_files[i].used = 1;
+            fs_files[i].size = 0;
+            fs_files[i].data[0] = '\0';
+            for (j = 0; j < FS_NAME_MAX - 1 && name[j]; j++)
+                fs_files[i].name[j] = name[j];
+            fs_files[i].name[j] = '\0';
+            return i;
+        }
+    }
+    return -1;   /* no free slot */
+}
+
+static void command_ls(void)
+{
+    int i, found = 0;
+    vga_puts_color("Files:\n", COLOR_HEAD);
+    for (i = 0; i < FS_MAX_FILES; i++) {
+        if (fs_files[i].used) {
+            vga_puts("  ");
+            vga_puts(fs_files[i].name);
+            vga_puts("  (");
+            print_udec((uint32_t)fs_files[i].size);
+            vga_puts(" bytes)\n");
+            found = 1;
+        }
+    }
+    if (!found)
+        vga_puts("  (empty)\n");
+}
+
+static void command_cat(const char *name)
+{
+    int idx;
+    if (name == 0 || *name == '\0') {
+        vga_puts_color("Usage: cat <filename>\n", COLOR_ERROR);
+        return;
+    }
+    idx = fs_find(name);
+    if (idx < 0) {
+        vga_puts_color("cat: file not found: ", COLOR_ERROR);
+        vga_puts(name);
+        vga_putc('\n');
+        return;
+    }
+    vga_puts(fs_files[idx].data);
+    if (fs_files[idx].size > 0 && fs_files[idx].data[fs_files[idx].size - 1] != '\n')
+        vga_putc('\n');
+}
+
+static void command_write(const char *args)
+{
+    /* args: "filename text..." */
+    char name[FS_NAME_MAX];
+    int i = 0, j, idx;
+    /* parse filename */
+    while (args && args[i] && args[i] != ' ' && i < FS_NAME_MAX - 1) {
+        name[i] = args[i];
+        i++;
+    }
+    name[i] = '\0';
+    if (i == 0) {
+        vga_puts_color("Usage: write <filename> <text>\n", COLOR_ERROR);
+        return;
+    }
+    while (args[i] == ' ') i++;
+    idx = fs_find(name);
+    if (idx < 0)
+        idx = fs_create(name);
+    if (idx < 0) {
+        vga_puts_color("write: cannot create file\n", COLOR_ERROR);
+        return;
+    }
+    /* write text */
+    for (j = 0; args[i] && j < FS_DATA_MAX - 1; j++, i++)
+        fs_files[idx].data[j] = args[i];
+    fs_files[idx].data[j] = '\0';
+    fs_files[idx].size = j;
+    vga_puts_color("Written: ", COLOR_OK);
+    vga_puts(name);
+    vga_putc('\n');
+}
+
+static void command_rm(const char *name)
+{
+    int idx;
+    if (name == 0 || *name == '\0') {
+        vga_puts_color("Usage: rm <filename>\n", COLOR_ERROR);
+        return;
+    }
+    idx = fs_find(name);
+    if (idx < 0) {
+        vga_puts_color("rm: file not found: ", COLOR_ERROR);
+        vga_puts(name);
+        vga_putc('\n');
+        return;
+    }
+    fs_files[idx].used = 0;
+    vga_puts_color("Removed: ", COLOR_OK);
+    vga_puts(name);
+    vga_putc('\n');
+}
+
+static void command_touch(const char *name)
+{
+    int idx;
+    if (name == 0 || *name == '\0') {
+        vga_puts_color("Usage: touch <filename>\n", COLOR_ERROR);
+        return;
+    }
+    idx = fs_find(name);
+    if (idx >= 0) {
+        vga_puts("touch: already exists: ");
+        vga_puts(name);
+        vga_putc('\n');
+        return;
+    }
+    idx = fs_create(name);
+    if (idx < 0) {
+        vga_puts_color("touch: cannot create file\n", COLOR_ERROR);
+        return;
+    }
+    vga_puts_color("Created: ", COLOR_OK);
+    vga_puts(name);
+    vga_putc('\n');
+}
+
 static void command_info(void)
 {
     vga_puts_color("ObsidianOS\n", COLOR_HEAD);
@@ -1235,6 +1399,16 @@ static void shell_execute(char *line)
         command_perms();
     } else if (strcmp(command, "dcrcp") == 0) {
         command_dcrcp();
+    } else if (strcmp(command, "ls") == 0) {
+        command_ls();
+    } else if (strcmp(command, "cat") == 0) {
+        command_cat(argument);
+    } else if (strcmp(command, "write") == 0) {
+        command_write(argument);
+    } else if (strcmp(command, "rm") == 0) {
+        command_rm(argument);
+    } else if (strcmp(command, "touch") == 0) {
+        command_touch(argument);
     } else if (strcmp(command, "info") == 0) {
         command_info();
     } else if (strcmp(command, "echo") == 0) {
