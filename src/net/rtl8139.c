@@ -190,7 +190,7 @@ int rtl8139_init(void)
     rx_next = 0;
 
     /* Receive ring: 8K, 4-byte aligned. */
-    outl(io_base + 0x30, (uint32_t)rx_ring);   /* RBSTART */
+    outl(io_base + 0x30, (uint32_t)(unsigned long)rx_ring);   /* RBSTART */
     outl(io_base + 0x44, 0x0000008Fu);         /* RCR: WRAP + accept all */
 
     outw(io_base + 0x3C, 0x0000u);             /* IMR: no interrupts */
@@ -249,7 +249,7 @@ int rtl8139_send(const void *data, int length)
                 break;
         }
 
-        outl(io_base + tsad_reg, (uint32_t)tx_buffer);  /* TSADn */
+        outl(io_base + tsad_reg, (uint32_t)(unsigned long)tx_buffer);  /* TSADn */
         outl(io_base + tsd_reg, (uint32_t)total);        /* TSDn: length, OWN = 0 */
 
         /* Wait for TOK (transmit OK). */

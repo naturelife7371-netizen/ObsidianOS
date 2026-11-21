@@ -308,8 +308,21 @@ static int keyboard_poll(void)
     }
 
     if (extended_key) {
+        int code = scancode;
         extended_key = 0;
-        return -1;              /* ignore arrows, home, ... */
+        if (scancode & 0x80)
+            return -1;          /* key release */
+        switch (code) {
+            case 0x48: return 1000;   /* up */
+            case 0x50: return 1001;   /* down */
+            case 0x4B: return 1002;   /* left */
+            case 0x4D: return 1003;   /* right */
+            case 0x47: return 1004;   /* home */
+            case 0x4F: return 1005;   /* end */
+            case 0x49: return 1006;   /* page up */
+            case 0x51: return 1007;   /* page down */
+            default:   return -1;
+        }
     }
 
     if (scancode & 0x80) {      /* key release */
@@ -355,8 +368,21 @@ static char keyboard_getchar(void)
 
     for (;;) {
         key = keyboard_poll();
-        if (key >= 0)
+        if (key >= 0 && key < 1000)
             return (char)key;
+
+        __asm__ volatile ("pause");
+    }
+}
+
+static int keyboard_getkey(void)
+{
+    int key;
+
+    for (;;) {
+        key = keyboard_poll();
+        if (key >= 0)
+            return key;
 
         __asm__ volatile ("pause");
     }
@@ -494,6 +520,8 @@ extern const uint8_t *rtl8139_mac(void);
 extern uint16_t       rtl8139_io_base(void);
 extern int            rtl8139_arp_resolve(const uint8_t ip[4], uint8_t mac[6]);
 extern int            rtl8139_ping(const uint8_t ip[4], const uint8_t mac[6]);
+
+
 
 /* --------------------------------------------------------------------------
  *  Shell
@@ -1011,10 +1039,62 @@ static const char *installer_keyboards[] = {
 };
 #define INSTALLER_KB_COUNT (sizeof(installer_keyboards)/sizeof(installer_keyboards[0]))
 
+static int installer_select(const char *title, const char **items, int count)
+{
+    int page = 0;
+    int per_page = 8;
+    int pages = (count + per_page - 1) / per_page;
+    int sel = 0;
+    int key;
+
+    for (;;) {
+        int i, start, end;
+        vga_clear();
+        vga_puts_color("=== ObsidianOS Installer ===\n", COLOR_HEAD);
+        vga_puts(title);
+        vga_puts("  (Up/Down move, PgUp/PgDn page, Enter select)\n\n");
+
+        start = page * per_page;
+        end = start + per_page;
+        if (end > count) end = count;
+        for (i = start; i < end; i++) {
+            if (i == sel)
+                vga_puts_color("  > ", COLOR_PROMPT);
+            else
+                vga_puts("    ");
+            print_udec(i + 1);
+            vga_puts(". ");
+            vga_puts(items[i]);
+            vga_putc('\n');
+        }
+        vga_puts("\n  Page ");
+        print_udec(page + 1);
+        vga_puts(" / ");
+        print_udec(pages);
+        vga_puts("   Selected: ");
+        vga_puts(items[sel]);
+        vga_putc('\n');
+
+        key = keyboard_getkey();
+        if (key == 1000) {          /* up */
+            if (sel > 0) sel--;
+            if (sel < page * per_page) page--;
+        } else if (key == 1001) {   /* down */
+            if (sel < count - 1) sel++;
+            if (sel >= (page + 1) * per_page) page++;
+        } else if (key == 1006) {   /* page up */
+            if (page > 0) { page--; sel = page * per_page; }
+        } else if (key == 1007) {   /* page down */
+            if (page < pages - 1) { page++; sel = page * per_page; }
+        } else if (key == '\n') {
+            return sel;
+        }
+    }
+}
+
 static void installer_run(void)
 {
-    int i, choice;
-    char key;
+    int lang, kb;
     uint32_t spin;
 
     /* Flush any stale keyboard bytes left from boot. */
@@ -1030,44 +1110,14 @@ static void installer_run(void)
     vga_puts_color("=== ObsidianOS Installer ===\n", COLOR_HEAD);
     vga_puts("Nothing here is saved; this is a one-time setup screen.\n\n");
 
-    vga_puts_color("1) Select language\n", COLOR_OK);
-    for (i = 0; i < (int)INSTALLER_LANG_COUNT; i++) {
-        vga_puts("  ");
-        if (i < 9) vga_putc(' ');
-        print_udec(i + 1);
-        vga_puts(". ");
-        vga_puts(installer_languages[i]);
-        vga_putc('\n');
-        if ((i + 1) % 3 == 0)
-            __asm__ volatile ("pause");
-    }
-    vga_puts("\nEnter number (default 1): ");
-    key = keyboard_getchar();
-    choice = 1;
-    if (key >= '1' && key <= '9') choice = key - '0';
-    vga_putc(key);
-    vga_putc('\n');
+    lang = installer_select("1) Select language\n", installer_languages, INSTALLER_LANG_COUNT);
     vga_puts("Language set to: ");
-    vga_puts(installer_languages[choice - 1]);
+    vga_puts(installer_languages[lang]);
     vga_putc('\n');
 
-    vga_puts_color("\n2) Select keyboard layout\n", COLOR_OK);
-    for (i = 0; i < (int)INSTALLER_KB_COUNT; i++) {
-        vga_puts("  ");
-        if (i < 9) vga_putc(' ');
-        print_udec(i + 1);
-        vga_puts(". ");
-        vga_puts(installer_keyboards[i]);
-        vga_putc('\n');
-    }
-    vga_puts("\nEnter number (default 1): ");
-    key = keyboard_getchar();
-    choice = 1;
-    if (key >= '1' && key <= '9') choice = key - '0';
-    vga_putc(key);
-    vga_putc('\n');
+    kb = installer_select("2) Select keyboard layout\n", installer_keyboards, INSTALLER_KB_COUNT);
     vga_puts("Keyboard set to: ");
-    vga_puts(installer_keyboards[choice - 1]);
+    vga_puts(installer_keyboards[kb]);
     vga_putc('\n');
 
     vga_puts_color("\n3) Quick survey (not saved)\n", COLOR_OK);
