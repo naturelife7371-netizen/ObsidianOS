@@ -151,11 +151,11 @@ if "%LINKMODE%"=="pe" (
     set "NASMFMT=elf32"
 )
 
-echo [3/4] Assembling boot.asm and entry.asm (%NASMFMT%) ...
+echo [3/4] Assembling boot.asm (NASM) and entry.S (clang) ...
 "%NASM%" -f bin "%SRC%\boot\boot.asm" -o "%BUILD%\boot.bin"
 if errorlevel 1 goto :compile_fail
 
-"%NASM%" -f %NASMFMT% "%SRC%\kernel\entry.asm" -o "%BUILD%\entry.o"
+"%CC%" --target=x86_64-elf -c "%SRC%\kernel\entry.S" -o "%BUILD%\entry.o"
 if errorlevel 1 goto :compile_fail
 
 rem ---------------------------------------------------------------------------
@@ -167,7 +167,7 @@ if "%LINKMODE%"=="elf" (
     powershell -NoProfile -ExecutionPolicy Bypass -Command "$lines=@('ENTRY(_start)','SECTIONS','{','  . = 0x10000;','  .text : { *(.text.entry) *(.text .text.*) }','  .rodata : { *(.rodata .rodata.*) }','  .data : { *(.data .data.*) }','  _bss_start = .;','  .bss : { *(COMMON) *(.bss .bss.*) }','  _bss_end = .;','  /DISCARD/ : { *(.comment) *(.note*) *(.eh_frame*) }','}'); Set-Content -Path '%BUILD%\linker.ld' -Value $lines -Encoding ASCII"
     if errorlevel 1 goto :link_fail
 
-    "%LD%" -m elf_i386 -T "%BUILD%\linker.ld" -o "%BUILD%\kernel.elf" "%BUILD%\entry.o" "%BUILD%\kernel.o" "%BUILD%\pci.o" "%BUILD%\rtl8139.o"
+    "%LD%" -m elf_x86_64 -T "%BUILD%\linker.ld" -o "%BUILD%\kernel.elf" "%BUILD%\entry.o" "%BUILD%\kernel.o" "%BUILD%\pci.o" "%BUILD%\rtl8139.o"
     if errorlevel 1 goto :link_fail
 
     "%OBJCOPY%" -O binary "%BUILD%\kernel.elf" "%BUILD%\kernel.bin"
@@ -234,8 +234,8 @@ set "CC=clang"
 set "LD=ld.lld"
 set "OBJCOPY=llvm-objcopy"
 set "LINKMODE=elf"
-set "CFLAGS_EXTRA=--target=i386-elf"
-set "TOOLCHAIN=clang --target=i386-elf + ld.lld"
+set "CFLAGS_EXTRA=--target=x86_64-elf"
+set "TOOLCHAIN=clang --target=x86_64-elf + ld.lld"
 goto :eof
 
 :try_plain_gcc

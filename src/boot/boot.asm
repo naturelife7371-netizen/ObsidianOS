@@ -64,42 +64,32 @@ start:
 .loaded:
 
     ; ------------------------------------------------------------------
-    ; Try to set a VESA graphics mode (1920x1080, then 1280x1024, then 1024x768).
+    ; Try to set a VESA graphics mode (1024x768x32) for the GUI.
     ; ------------------------------------------------------------------
-    ; Try 1920x1080x32 (mode 0x014D)
-    mov ax, 0x4F02
-    mov bx, 0x414D
-    int 0x10
-    cmp ax, 0x004F
-    je .vbe_ok
-    ; Try 1280x1024x32 (mode 0x011B)
-    mov ax, 0x4F02
-    mov bx, 0x411B
-    int 0x10
-    cmp ax, 0x004F
-    je .vbe_ok
-    ; Try 1024x768x32 (mode 0x0118)
+    push ds
+    push es
+    xor ax, ax
+    mov ds, ax
+    mov es, ax
     mov ax, 0x4F02
     mov bx, 0x4118
     int 0x10
+    pop es
+    pop ds
     cmp ax, 0x004F
     jne .vbe_fail
-.vbe_ok:
-    ; Save the mode number that was set (in BX before int 0x10, but BX was clobbered; use a fixed approach)
-    ; We'll query mode info for the last successful mode. Since we don't track which, try 0x0118 info.
-    ; Simpler: get mode info for 0x0118 (works for all if mode is active? No.)
-    ; Instead, use the current mode: INT 10h AX=4F03 returns current mode in BX.
-    mov ax, 0x4F03
-    int 0x10
-    mov cx, bx
-    and cx, 0x01FF
-    mov ax, 0x4F01
-    mov di, 0x9100
-    push es
+    ; Get mode info
     push ds
-    pop es
+    push es
+    xor ax, ax
+    mov ds, ax
+    mov es, ax
+    mov ax, 0x4F01
+    mov cx, 0x0118
+    mov di, 0x9100
     int 0x10
     pop es
+    pop ds
     cmp ax, 0x004F
     jne .vbe_fail
     mov eax, [0x9100 + 0x28]
