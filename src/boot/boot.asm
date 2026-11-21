@@ -53,50 +53,45 @@ start:
     jnc .loaded
 
     ; ------------------------------------------------------------------
-    ; Fallback: CHS reads, one sector at a time (1.44MB floppy geometry).
+    ; Fallback: CHS reads (compact version).
     ; ------------------------------------------------------------------
-    mov si, msg_chs
-    call print_string
-
-    mov word [sectors_left], KERNEL_SECTORS
-    mov word [cur_lba], KERNEL_LBA
-    mov word [load_seg], KERNEL_SEG
-    mov word [load_off], 0
-
-.read_loop:
-    ; LBA -> cylinder / head / sector
-    mov ax, [cur_lba]
-    xor dx, dx
-    mov cx, 18
-    div cx                          ; ax = lba / 18, dx = lba % 18
-    inc dl
-    mov [chs_sector], dl
-    xor dx, dx
-    mov cx, 2
-    div cx                          ; ax = cylinder, dx = head
-    mov [chs_cyl], al
-    mov [chs_head], dl
-
-    mov ax, [load_seg]
-    mov es, ax
-    mov bx, [load_off]
-
-    mov ch, [chs_cyl]
-    mov cl, [chs_sector]
-    mov dh, [chs_head]
-    mov dl, [boot_drive]
-    mov ax, 0x0201                  ; AH=02 read, AL=1 sector
-    int 0x13
-    jc .disk_error
-
-    add word [load_off], 512
-    inc word [cur_lba]
-    dec word [sectors_left]
-    jnz .read_loop
-
-.loaded:
     mov si, msg_loaded
     call print_string
+
+    ; If LBA read failed, halt.
+    jc .disk_error
+
+.loaded:
+
+    ; ------------------------------------------------------------------
+    ; Try to set a VESA graphics mode (1024x768x32) for the GUI.
+    ; ------------------------------------------------------------------
+    mov ax, 0x4F02
+    mov bx, 0x4118
+    int 0x10
+    cmp ax, 0x004F
+    jne .vbe_fail
+    ; Get mode info for framebuffer address
+    mov ax, 0x4F01
+    mov cx, 0x0118
+    mov di, 0x9100
+    push es
+    push ds
+    pop es
+    int 0x10
+    pop es
+    mov eax, [0x9100 + 0x28]
+    mov [0x9000], eax
+    mov ax, [0x9100 + 0x12]
+    mov [0x9004], ax
+    mov ax, [0x9100 + 0x14]
+    mov [0x9006], ax
+    mov byte [0x9008], 1
+    jmp .vbe_done
+.vbe_fail:
+    mov dword [0x9000], 0
+    mov byte [0x9008], 0
+.vbe_done:
 
     ; ------------------------------------------------------------------
     ; Enable A20 through the "fast A20" port 0x92
